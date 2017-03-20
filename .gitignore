@@ -1,5 +1,5 @@
-**/*.csv
-
+/src/main/resources/
+!/src/test/resources/
 
 ### SBT template
 # Simple Build Tool
@@ -62,3 +62,4 @@ com_crashlytics_export_strings.xml
 crashlytics.properties
 crashlytics-build.properties
 fabric.properties
+
