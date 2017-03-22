@@ -4,21 +4,50 @@ import java.io.File
 
 import com.sksamuel.scrimage.{Image, Pixel}
 
+import scala.collection.parallel.ParIterable
+
 /**
   * 2nd milestone: basic visualization
   */
 object Visualization {
 
+  val earthRadius = 6371
+
   implicit class RichLocation(loc: Location) {
 
-    import math.{cos, abs, acos, sin}
+    import math._
 
-    val earthRadius = 6371
+    def toRadians: (Double, Double) = (math.toRadians(loc.lat), math.toRadians(loc.lon))
 
+    // accurate for all distances
     def greatCircleDistance(other: Location): Double = {
-      val lonDelta = abs(loc.lon - other.lon)
-      val centralAngle = acos(sin(loc.lat) * sin(other.lat) + cos(loc.lat) * cos(other.lat) * cos(lonDelta))
+      val (lat1, lon1) = loc.toRadians
+      val (lat2, lon2) = other.toRadians
+      val lonDelta = abs(lon1 - lon2)
+      val y = sqrt(
+        pow(cos(lat2) * sin(lonDelta), 2) +
+          pow(cos(lat1) * sin(lat2) - sin(lat1) * cos(lat2) * cos(lonDelta), 2))
+      val x = sin(lat1) * sin(lat2) + cos(lat1) * cos(lat2) * cos(lonDelta)
+      val centralAngle = atan2(y, x)
       earthRadius * centralAngle
+    }
+  }
+
+  def idw(samples: ParIterable[(Location, Double)], value: Location, power: Double = 4): Double = {
+    val distances = samples.map { case (location, temperature) => (value.greatCircleDistance(location), temperature) }
+
+    distances.find { case (distance, _) => distance == 0 } match {
+      case Some((_, temperature)) => temperature
+      case None =>
+        val (weighted, weights) = distances.aggregate((0.0, 0.0))(seqop = (acc, record) => {
+          val (weightedAcc, weightsAcc) = acc
+          val (dist, temp) = record
+          val weight = math.pow(1.0 / dist, power)
+          val weighted = weight * temp
+          (weightedAcc + weighted, weightsAcc + weight)
+        }, combop = (w1, w2) => (w1._1 + w2._1, w1._2 + w2._2))
+
+        weighted / weights
     }
   }
 
@@ -28,18 +57,7 @@ object Visualization {
     * @return The predicted temperature at `location`
     */
   def predictTemperature(temperatures: Iterable[(Location, Double)], location: Location): Double = {
-    temperatures.find(_._1 == location) match {
-      case Some((_, temperature)) => temperature
-      case None =>
-        // inverse distance weighting (basic form)
-        // see https://en.wikipedia.org/wiki/Inverse_distance_weighting
-        val (totalWeighted, totalWeights) = temperatures.foldLeft(0.0, 0.0) { (acc, point) =>
-          val weight = 1 / location.greatCircleDistance(point._1)
-          val weighted = weight * point._2
-          (acc._1 + weighted, acc._2 + weight)
-        }
-        totalWeighted / totalWeights
-    }
+    idw(temperatures.par, location)
   }
 
   /**
@@ -48,15 +66,16 @@ object Visualization {
     * @return The color that corresponds to `value`, according to the color scale defined by `points`
     */
   def interpolateColor(points: Iterable[(Double, Color)], value: Double): Color = {
-    import math._
 
-    def clamp(x: Double) = 0.0.max(x).min(1.0)
+    import math._
 
     def scale(xMin: Double, xMax: Double, x: Double) = (x - xMin) / (xMax - xMin)
 
     def lerp(v0: Double, v1: Double, t: Double) = (1 - t) * v0 + t * v1
 
     val pointsMap = points.toMap
+
+    // t1 always <= t2
     val (t1, c1, t2, c2) = {
       val first = pointsMap.minBy(point => abs(point._1 - value))
       val second = pointsMap - first._1 minBy (point => abs(point._1 - value))
@@ -64,12 +83,17 @@ object Visualization {
       else (second._1, second._2, first._1, first._2)
     }
 
-    val t = clamp(scale(min(t1, t2), max(t1, t2), value))
+    value match {
+      case x if x < t1 => c1
+      case x if x > t2 => c2
+      case _ =>
+        val t = scale(t1, t2, value)
+        val r = lerp(c1.red, c2.red, t)
+        val g = lerp(c1.green, c2.green, t)
+        val b = lerp(c1.blue, c2.blue, t)
+        Color(round(r).toInt, round(g).toInt, round(b).toInt)
+    }
 
-    val r = lerp(c1.red, c2.red, t)
-    val g = lerp(c1.green, c2.green, t)
-    val b = lerp(c1.blue, c2.blue, t)
-    Color(round(r).toInt, round(g).toInt, round(b).toInt)
   }
 
   /**
@@ -79,9 +103,9 @@ object Visualization {
     */
   def visualize(temperatures: Iterable[(Location, Double)], colors: Iterable[(Double, Color)]): Image = {
     val locations = for {
-      y <- Range(0, 180)
-      x <- Range(0, 360)
-    } yield Location(x - 180, -y + 90)
+      y <- Range(90, -90, -1)
+      x <- Range(-180, 180)
+    } yield Location(y, x)
 
     val pixels = locations.par.map { location =>
       val predictedTemp = predictTemperature(temperatures, location)
@@ -93,7 +117,7 @@ object Visualization {
   }
 }
 
-object VisApp extends App {
+object VisualizationMain extends App {
 
   import Extraction._
 
