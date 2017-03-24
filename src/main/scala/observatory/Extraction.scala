@@ -1,8 +1,9 @@
 package observatory
 
-import java.io.InputStream
 import java.time.LocalDate
 
+
+import scala.collection.parallel.ParIterable
 import scala.io.Source
 
 
@@ -13,9 +14,37 @@ object Extraction {
 
   def toCelsius(fahrenheit: Double): Double = (fahrenheit - 32) * 5.0 / 9.0
 
-  def loader(test: Boolean): String => InputStream = {
-    if (test) getClass.getClassLoader.getResourceAsStream(_)
-    else getClass.getResourceAsStream(_)
+  def locateTemperaturesRegex(year: Int, stationsFile: String, temperaturesFile: String): Iterable[(LocalDate, Location, Double)] = {
+
+    // uses negative lookbehind to ensure pattern won't match if stn id and wban id are both blank
+    val stationsRegex =
+      """(\d*),(\d*)(?<!^,),([\+-]?\d+\.\d+),([\+-]?\d+\.\d+)""".r
+
+    val stationsMap = Source
+      .fromInputStream(getClass.getResourceAsStream(stationsFile))
+      .getLines()
+      .collect {
+        case stationsRegex(stn, wban, lat, lon) => (stn, wban) -> Location(lat.toDouble, lon.toDouble)
+      }
+      .toMap
+
+
+    val temperaturesRegex =
+      """(\d*),(\d*)(?<!^,),(\d+),(\d+),([\+-]?\d+\.\d+)(?<!9999\.0)""".r
+    Source
+      .fromInputStream(getClass.getResourceAsStream(temperaturesFile))
+      .getLines()
+      .collect {
+        case temperaturesRegex(stn, wban, month, day, temp) =>
+          val localDate = LocalDate.of(year, month.toInt, day.toInt)
+          // look up location data
+          val maybeLocation = stationsMap.get((stn, wban))
+          val temperature = toCelsius(temp.toDouble)
+          (localDate, maybeLocation, temperature)
+      }
+      // drop any temperature records that were missing location data (no corresponding record in stations.csv)
+      .collect { case (localDate, Some(location), temperature) => (localDate, location, temperature) }
+      .toStream
   }
 
   /**
@@ -24,13 +53,11 @@ object Extraction {
     * @param temperaturesFile Path of the temperatures resource file to use (e.g. "/1975.csv")
     * @return A sequence containing triplets (date, location, temperature)
     */
-  def locateTemperatures(year: Int, stationsFile: String, temperaturesFile: String, test: Boolean = false): Iterable[(LocalDate, Location, Double)] = {
-
-    // a little hack to load test resources for unit-testing
-    val loaderFunc = loader(test)
+  def locateTemperatures(year: Int, stationsFile: String, temperaturesFile: String): Iterable[(LocalDate, Location, Double)] = {
+    val stationRegex = """((\d+),(\d*)|(\d*),(\d+)),(\d+),(\d+)""".r
 
     val stationMap = Source
-      .fromInputStream(loaderFunc(stationsFile))
+      .fromInputStream(getClass.getResourceAsStream(stationsFile))
       .getLines()
       .map(_.split(",", -1))
       // drop records missing both station identifiers or geographic location
@@ -42,7 +69,7 @@ object Extraction {
       .toMap
 
     Source
-      .fromInputStream(loaderFunc(temperaturesFile))
+      .fromInputStream(getClass.getResourceAsStream(temperaturesFile))
       .getLines()
       .map(_.split(",", -1))
       // drop records missing both station ids temperature or date data
@@ -60,30 +87,66 @@ object Extraction {
       })
       // drop any temperature records that were missing location data (no corresponding record in stations.csv)
       .collect { case (localDate, Some(location), temperature) => (localDate, location, temperature) }
-      // sorting is required due to grader idiosyncrasies. remove if grader is fixed
-      .toList.sortBy(tpl => (tpl._1.getMonthValue, tpl._1.getDayOfMonth))
+      .toStream
+    // sorting is required due to grader idiosyncrasies. remove if grader is fixed
+    //      .toList.sortBy(tpl => (tpl._1.getMonthValue, tpl._1.getDayOfMonth))
   }
 
   /**
     * @param records A sequence containing triplets (date, location, temperature)
     * @return A sequence containing, for each location, the average temperature over the year.
     */
-  def locationYearlyAverageRecords(records: Iterable[(LocalDate, Location, Double)]): Iterable[(Location, Double)] = records
-    .groupBy(_._2)
-    .mapValues { iterable =>
-      val size = iterable.size
-      val sum = iterable.map(_._3).sum
-      sum / size
-    }.toStream
+  def locationYearlyAverageRecords(records: Iterable[(LocalDate, Location, Double)]): Iterable[(Location, Double)] =
+    locationYearlyAverageRecords(records.par)
+
+  def locationYearlyAverageRecords(records: ParIterable[(LocalDate, Location, Double)]): Iterable[(Location, Double)] =
+    records
+      .groupBy(_._2)
+      .mapValues { iterable =>
+        val size = iterable.size
+        val sum = iterable.map(_._3).sum
+        sum / size
+      }.toStream
 }
 
-object ExtractTestData extends App {
+object ExtractionBenchmark extends App {
 
   import Extraction._
+  import org.scalameter._
+  import org.scalameter
+
+  val time = config(
+    Key.exec.benchRuns -> 5,
+    Key.verbose -> false
+  ) withWarmer {
+    new scalameter.Warmer.Default
+  } withMeasurer {
+    new Measurer.IgnoringGC
+  }
+
+  val locateTime = time measure {
+    locateTemperatures(2000, "/stations.csv", "/2000.csv")
+  }
+  println(s"locateTemperatures time: $locateTime")
+
+  val locateRegexTime = time measure {
+    locateTemperaturesRegex(2000, "/stations.csv", "/2000.csv")
+  }
+  println(s"locateTemperaturesRegex time: $locateRegexTime")
+
 
   val results = locateTemperatures(2000, "/stations.csv", "/2000.csv")
-  results.take(10).foreach(println)
-  val averages = locationYearlyAverageRecords(results)
-  averages.take(10).foreach(println)
+
+  val averageTime = time measure {
+    locationYearlyAverageRecords(results)
+  }
+  println(s"locationYearlyAverageRecords - serial execution time: $averageTime")
+
+
+  val parResults = results.par
+  val parAverageTime = time measure {
+    locationYearlyAverageRecords(parResults)
+  }
+  println(s"locationYearlyAverageRecords - parallel execution time: $parAverageTime")
 }
 

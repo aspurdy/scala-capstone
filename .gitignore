@@ -3,10 +3,7 @@
 
 ### SBT template
 # Simple Build Tool
-# http://www.scala-sbt.org/release/docs/Getting-Started/Directories.html#configuring-version-control
-
-
-dist/*
+# http://www.scala-sbt.org/release/docs/Getting-Started/Directories.html#configuring-version-control dist/*
 target/
 lib_managed/
 src_managed/
@@ -49,6 +46,7 @@ project/plugins/project/
 ## Plugin-specific files:
 
 # IntelliJ
+*.iml
 /out/
 
 # mpeltonen/sbt-idea plugin

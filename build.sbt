@@ -16,6 +16,7 @@ scalacOptions ++= Seq(
 )
 
 libraryDependencies ++= Seq(
+  "com.storm-enroute" %% "scalameter" % "0.7",
   "com.sksamuel.scrimage" %% "scrimage-core" % "2.1.6", // for visualization
   // You don’t *have to* use Spark, but in case you want to, we have added the dependency
   "org.apache.spark" %% "spark-core" % "2.0.0",
