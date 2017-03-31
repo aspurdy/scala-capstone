@@ -14,39 +14,6 @@ object Extraction {
 
   def toCelsius(fahrenheit: Double): Double = (fahrenheit - 32) * 5.0 / 9.0
 
-  def locateTemperaturesRegex(year: Int, stationsFile: String, temperaturesFile: String): Iterable[(LocalDate, Location, Double)] = {
-
-    // uses negative lookbehind to ensure pattern won't match if stn id and wban id are both blank
-    val stationsRegex =
-      """(\d*),(\d*)(?<!^,),([\+-]?\d+\.\d+),([\+-]?\d+\.\d+)""".r
-
-    val stationsMap = Source
-      .fromInputStream(getClass.getResourceAsStream(stationsFile))
-      .getLines()
-      .collect {
-        case stationsRegex(stn, wban, lat, lon) => (stn, wban) -> Location(lat.toDouble, lon.toDouble)
-      }
-      .toMap
-
-
-    val temperaturesRegex =
-      """(\d*),(\d*)(?<!^,),(\d+),(\d+),([\+-]?\d+\.\d+)(?<!9999\.0)""".r
-    Source
-      .fromInputStream(getClass.getResourceAsStream(temperaturesFile))
-      .getLines()
-      .collect {
-        case temperaturesRegex(stn, wban, month, day, temp) =>
-          val localDate = LocalDate.of(year, month.toInt, day.toInt)
-          // look up location data
-          val maybeLocation = stationsMap.get((stn, wban))
-          val temperature = toCelsius(temp.toDouble)
-          (localDate, maybeLocation, temperature)
-      }
-      // drop any temperature records that were missing location data (no corresponding record in stations.csv)
-      .collect { case (localDate, Some(location), temperature) => (localDate, location, temperature) }
-      .toStream
-  }
-
   /**
     * @param year             Year number
     * @param stationsFile     Path of the stations resource file to use (e.g. "/stations.csv")
@@ -54,8 +21,6 @@ object Extraction {
     * @return A sequence containing triplets (date, location, temperature)
     */
   def locateTemperatures(year: Int, stationsFile: String, temperaturesFile: String): Iterable[(LocalDate, Location, Double)] = {
-    val stationRegex = """((\d+),(\d*)|(\d*),(\d+)),(\d+),(\d+)""".r
-
     val stationMap = Source
       .fromInputStream(getClass.getResourceAsStream(stationsFile))
       .getLines()
@@ -128,12 +93,6 @@ object ExtractionBenchmark extends App {
     locateTemperatures(2000, "/stations.csv", "/2000.csv")
   }
   println(s"locateTemperatures time: $locateTime")
-
-  val locateRegexTime = time measure {
-    locateTemperaturesRegex(2000, "/stations.csv", "/2000.csv")
-  }
-  println(s"locateTemperaturesRegex time: $locateRegexTime")
-
 
   val results = locateTemperatures(2000, "/stations.csv", "/2000.csv")
 
