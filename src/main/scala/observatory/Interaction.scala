@@ -97,9 +97,14 @@ object GenerateTiles extends App {
 
 
   def generateTileToDisk(year: Int, zoom: Int, x: Int, y: Int, temperatureData: Iterable[(Location, Double)]): Unit = {
-    val out = s"target/temperatures/$year/$zoom/$x-$y.png"
+    val dir = s"target/temperatures/$year/$zoom"
+    val fileName = s"$x-$y.png"
+    val dirFile = new File(dir)
+    if (!dirFile.exists()) {
+      dirFile.mkdirs()
+    }
     val image = tile(temperatureData, colorScale, zoom, x, y)
-    val _ = image.output(new File(out))
+    val _ = image.output(new File(dir + File.separator + fileName))
   }
 
   generateTiles[Iterable[(Location, Double)]](yearlyData, generateTileToDisk, zoom = 1)
