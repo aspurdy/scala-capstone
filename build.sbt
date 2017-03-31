@@ -16,7 +16,7 @@ scalacOptions ++= Seq(
 )
 
 libraryDependencies ++= Seq(
-  "com.storm-enroute" %% "scalameter" % "0.7",
+  "com.storm-enroute" %% "scalameter" % "0.8.2",
   "com.sksamuel.scrimage" %% "scrimage-core" % "2.1.6", // for visualization
   // You don’t *have to* use Spark, but in case you want to, we have added the dependency
   "org.apache.spark" %% "spark-core" % "2.0.0",
@@ -42,7 +42,7 @@ assignmentsMap := Map(
     maxScore = 10d,
     styleScoreRatio = 0.2,
     styleSheet = (baseDirectory.value / "scalastyle" / "observatory.xml").getPath,
-    options = Map("Xmx"->"1500m", "grader-memory"->"2048", "grader-cpu" -> "2")
+    options = Map("Xmx" -> "1500m", "grader-memory" -> "2048", "grader-cpu" -> "2")
   )
 )
 
