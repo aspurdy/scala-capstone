@@ -1,7 +1,5 @@
 package observatory
 
-import java.io.File
-
 import com.sksamuel.scrimage.{Image, Pixel}
 
 import scala.collection.parallel.ParIterable
@@ -11,16 +9,33 @@ import scala.collection.parallel.ParIterable
   */
 object Visualization {
 
-  val earthRadius = 6371
-
   implicit class RichLocation(loc: Location) {
+
+    val earthRadius = 6371
 
     import math._
 
     def toRadians: (Double, Double) = (math.toRadians(loc.lat), math.toRadians(loc.lon))
 
+    def sphericalCosineDistance(other: Location): Double = {
+      val (lat1, lon1) = loc.toRadians
+      val (lat2, lon2) = other.toRadians
+      val lonDelta = abs(lon1 - lon2)
+      val centralAngle = acos(sin(lat1) * sin(lat2) + cos(lat1) * cos(lat2) * cos(lonDelta))
+      centralAngle * earthRadius
+    }
+
+    def haversineDistance(other: Location): Double = {
+      val (lat1, lon1) = loc.toRadians
+      val (lat2, lon2) = other.toRadians
+      val lonDelta = abs(lon1 - lon2)
+      val latDelta = abs(lat1 - lat2)
+      val centralAngle = 2 * asin(pow(sin(0.5 * latDelta), 2) + cos(lat1) * cos(lat2) * pow(sin(0.5 * lonDelta), 2))
+      centralAngle * earthRadius
+    }
+
     // accurate for all distances
-    def greatCircleDistance(other: Location): Double = {
+    def vincentyDistance(other: Location): Double = {
       val (lat1, lon1) = loc.toRadians
       val (lat2, lon2) = other.toRadians
       val lonDelta = abs(lon1 - lon2)
@@ -34,7 +49,7 @@ object Visualization {
   }
 
   def idw(samples: ParIterable[(Location, Double)], value: Location, power: Double = 4): Double = {
-    val distances = samples.map { case (location, temperature) => (value.greatCircleDistance(location), temperature) }
+    val distances = samples.map { case (location, temperature) => (value.vincentyDistance(location), temperature) }
 
     distances.find { case (distance, _) => distance == 0 } match {
       case Some((_, temperature)) => temperature
@@ -93,7 +108,6 @@ object Visualization {
         val b = lerp(c1.blue, c2.blue, t)
         Color(round(r).toInt, round(g).toInt, round(b).toInt)
     }
-
   }
 
   /**
@@ -117,11 +131,15 @@ object Visualization {
   }
 }
 
-object VisualizationMain extends App {
+
+object VisualizationBenchmark extends App {
 
   import Extraction._
+  import Visualization._
+  import org.scalameter
+  import org.scalameter._
 
-  val results = locateTemperatures(2000, "/stations.csv", "/2000.csv")
+  val results = locateTemperatures(2000, "/stations.csv", "/2000.csv").take(16).par
   val averages = locationYearlyAverageRecords(results)
 
   val colorScale = List(
@@ -135,7 +153,17 @@ object VisualizationMain extends App {
     (-60.0, Color(0, 0, 0))
   )
 
-  val image = Visualization.visualize(temperatures = averages, colors = colorScale)
+  val time = config(
+    Key.exec.benchRuns -> 5,
+    Key.verbose -> true
+  ) withWarmer {
+    new scalameter.Warmer.Default
+  } withMeasurer {
+    new Measurer.IgnoringGC
+  }
 
-  image.output(new File("target/test.png"))
+  val visualizeTime = time measure {
+    visualize(averages, colorScale)
+  }
+  println(s"visualize took $visualizeTime")
 }
