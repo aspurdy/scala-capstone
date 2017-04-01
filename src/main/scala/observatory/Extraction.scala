@@ -74,6 +74,7 @@ object Extraction {
       }.toStream
 }
 
+// todo: move benchmarks to test
 object ExtractionBenchmark extends App {
 
   import Extraction._
@@ -108,4 +109,3 @@ object ExtractionBenchmark extends App {
   }
   println(s"locationYearlyAverageRecords - parallel execution time: $parAverageTime")
 }
-

@@ -10,7 +10,7 @@ object Manipulation {
     * @see http://http.developer.nvidia.com/Cg/acos.html
     * @return computes the inverse cosine of the given angle in radians.
     * @param radians the input angle in radians [-1, 1]
-    **/
+    * */
   def acos(radians: Double): Double = {
     val negate = if (radians < 0) 1.0 else 0.0
     val d = math.abs(radians)
@@ -27,22 +27,23 @@ object Manipulation {
     centralAngle * 6371
   }
 
-  def idw(temperatures: Iterable[(Location, Double)],
+  def idw(temperatures: collection.GenMap[Location, Double],
           gridLocation: Location,
-          power: Double = 1): Double = {
-    val distances = temperatures.map(tpl => (sphericalCosineDistance(tpl._1, gridLocation), tpl._2))
-    distances.find(_._1 == 0) match {
-      case Some((_, temp)) => temp
-      case None =>
-        val (weightedSum, weightSum) = distances.aggregate((0.0, 0.0))(
-          seqop = (acc, record) => {
-            val (weightedSumAcc, weightSumAcc) = acc
-            val (distance, temperature) = record
-            //            val weight = math.pow(1.0 / dist, power)
-            val weight = 1.0 / distance
-            (weightedSumAcc + weight * temperature, weightSumAcc + weight)
-          }, combop = (w1, w2) => (w1._1 + w2._1, w1._2 + w2._2))
-        weightedSum / weightSum
+          power: Double = 4): Double = {
+
+    if (temperatures.contains(gridLocation)) {
+      temperatures(gridLocation)
+    } else {
+      val (weightedSum, weightSum) = temperatures.aggregate((0.0, 0.0))(
+        seqop = (acc, record) => {
+          val (weightedSumAcc, weightSumAcc) = acc
+          val (location, temperature) = record
+          val distance = sphericalCosineDistance(location, gridLocation)
+          //            val weight = math.pow(1.0 / distance, power)
+          val weight = 1.0 / distance
+          (weightedSumAcc + weight * temperature, weightSumAcc + weight)
+        }, combop = (w1, w2) => (w1._1 + w2._1, w1._2 + w2._2))
+      weightedSum / weightSum
     }
   }
 
@@ -52,10 +53,11 @@ object Manipulation {
     *         returns the predicted temperature at this location
     */
   def makeGrid(temperatures: Iterable[(Location, Double)]): (Int, Int) => Double = {
+    val temperaturesMap = temperatures.toMap
     val parGridData = for {
       latitude <- (-89 to 90).par
       longitude <- (-180 to 179).par
-    } yield (latitude, longitude) -> idw(temperatures, Location(latitude, longitude))
+    } yield (latitude, longitude) -> idw(temperaturesMap, Location(latitude, longitude))
 
     Function.untupled(parGridData.toMap.apply)
   }
@@ -89,3 +91,29 @@ object Manipulation {
   }
 }
 
+object ManipulationBenchmark extends App {
+
+  import Extraction._
+  import Manipulation._
+  import org.scalameter
+  import org.scalameter._
+
+  val time = config(
+    Key.exec.benchRuns -> 5,
+    Key.verbose -> false
+  ) withWarmer {
+    new scalameter.Warmer.Default
+  } withMeasurer {
+    new Measurer.IgnoringGC
+  }
+
+
+  val temperatures = locateTemperatures(1976, "/stations.csv", s"/1975.csv")
+  val yearlyAverages = locationYearlyAverageRecords(temperatures).take(100)
+
+  val makeGridTime = time measure {
+    makeGrid(yearlyAverages)
+  }
+
+  println(s"makeGrid - execution time: $makeGridTime")
+}

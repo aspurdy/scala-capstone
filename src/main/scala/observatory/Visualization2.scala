@@ -1,5 +1,7 @@
 package observatory
 
+import java.io.File
+
 import com.sksamuel.scrimage.{Image, Pixel}
 import Interaction.tileLocation
 import Visualization.interpolateColor
@@ -8,7 +10,6 @@ import Visualization.interpolateColor
   * 5th milestone: value-added information visualization
   */
 object Visualization2 {
-  val tileSize = 256
 
   /**
     * @param x   X coordinate between 0 and 1
@@ -44,7 +45,8 @@ object Visualization2 {
                      colors: Iterable[(Double, Color)],
                      zoom: Int,
                      x: Int,
-                     y: Int
+                     y: Int,
+                     tileSize: Int = 256
                    ): Image = {
 
     def clampLongitude(lon: Int): Int = ((lon + 180) % 360) - 180
@@ -77,4 +79,87 @@ object Visualization2 {
     Image(tileSize, tileSize, pixels.toArray)
   }
 
+  def generateTileToDisk(year: Int, zoom: Int, x: Int, y: Int, grid: (Int, Int) => Double, colorScale: List[(Double, Color)], outDir: String, tileSize: Int = 256): Unit = {
+    val dir = s"target/$outDir/$year/$zoom"
+    val fileName = s"$x-$y.png"
+    val dirFile = new File(dir)
+    if (!dirFile.exists()) {
+      dirFile.mkdirs()
+    }
+    val image = visualizeGrid(grid, colorScale, zoom, x, y, tileSize)
+    val _ = image.output(new File(dir + File.separator + fileName))
+  }
+}
+
+object GenerateTemperatureTiles extends App {
+
+  import Extraction._
+  import Visualization2._
+  import Manipulation._
+
+  // represents temperatures
+  val colorScale = List(
+    (60.0, Color(255, 255, 255)),
+    (32.0, Color(255, 0, 0)),
+    (12.0, Color(255, 255, 0)),
+    (0.0, Color(0, 255, 255)),
+    (-15.0, Color(0, 0, 255)),
+    (-27.0, Color(255, 0, 255)),
+    (-50.0, Color(33, 0, 107)),
+    (-60.0, Color(0, 0, 0))
+  )
+
+
+  println("Computing yearly averages...")
+  for {
+    year <- (1975 to 1976) union (1990 to 1991)
+    records = locateTemperatures(year, "/stations.csv", s"/$year.csv")
+    yearlyAverages = locationYearlyAverageRecords(records)
+    grid = makeGrid(yearlyAverages)
+    zoom <- (0 to 3).par
+    x <- 0 until 1 << zoom
+    y <- 0 until 1 << zoom
+  } yield generateTileToDisk(year, zoom, x, y, grid, colorScale, "temperatures", tileSize = 128)
+
+}
+
+object GenerateDeviationTiles extends App {
+
+  import Extraction._
+  import Visualization2._
+  import Manipulation._
+
+
+  // represents temperature deviations
+  val colorScale: List[(Double, Color)] = List(
+    (7.0, Color(0, 0, 0)),
+    (4.0, Color(255, 0, 0)),
+    (2.0, Color(255, 255, 0)),
+    (0.0, Color(255, 255, 255)),
+    (-2.0, Color(0, 255, 255)),
+    (-7.0, Color(0, 0, 255))
+  )
+
+  println("Computing yearly averages...")
+  val yearlyAverages = for {
+    year <- 1975 to 1976
+    temperatures = locateTemperatures(year, "/stations.csv", s"/$year.csv")
+  } yield locationYearlyAverageRecords(temperatures)
+
+  println("Computing normals...")
+  // mean average temperatures for years between 1975 and 1989
+  val normals = average(yearlyAverages)
+
+
+  // incremental data manipulation
+  for {
+    year <- 1990 to 1991
+    temperatures = locateTemperatures(year, "/stations.csv", s"/$year.csv")
+    averages = locationYearlyAverageRecords(temperatures)
+    _ = println(s"Generating deviation tile for year $year...")
+    deviations = deviation(averages, normals)
+    zoom <- (0 to 3).par
+    x <- 0 until 1 << zoom
+    y <- 0 until 1 << zoom
+  } yield generateTileToDisk(year, zoom, x, y, deviations, colorScale, "deviations", tileSize = 128)
 }

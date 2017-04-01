@@ -71,10 +71,12 @@ class VisualizationTest extends FunSuite with Checkers {
     val l2 = Location(0, 0)
     assert(l1.sphericalCosineDistance(l2) == 0)
   }
+
+  // todo: should check for rounding errors when using distance functions that use the fast acos approximation
   test("great circle distance should return known result") {
     val l1 = Location(0, 0)
     val l2 = Location(90, 90)
-    assert(l1.sphericalCosineDistance(l2) == math.toRadians(90) * 6371.0)
+    assert(l1.vincentyDistance(l2) === math.toRadians(90) * 6371.0)
   }
 
   test("interpolate color - degenerate min") {

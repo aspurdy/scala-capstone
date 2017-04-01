@@ -2,8 +2,6 @@ package observatory
 
 import com.sksamuel.scrimage.{Image, Pixel}
 
-import scala.collection.parallel.ParIterable
-
 /**
   * 2nd milestone: basic visualization
   */
@@ -13,7 +11,9 @@ object Visualization {
 
     val earthRadius = 6371
 
-    import math._
+    // todo: refactor code duplication
+    import math.{asin, cos, sin, abs, pow, sqrt, atan2}
+    import Manipulation.acos
 
     def toRadians: (Double, Double) = (math.toRadians(loc.lat), math.toRadians(loc.lon))
 
@@ -48,21 +48,23 @@ object Visualization {
     }
   }
 
-  def idw(samples: ParIterable[(Location, Double)], value: Location, power: Double = 4): Double = {
-    val distances = samples.map { case (location, temperature) => (value.vincentyDistance(location), temperature) }
+  def idw(temperatures: collection.GenMap[Location, Double],
+          query: Location,
+          power: Double = 4): Double = {
 
-    distances.find { case (distance, _) => distance == 0 } match {
-      case Some((_, temperature)) => temperature
-      case None =>
-        val (weighted, weights) = distances.aggregate((0.0, 0.0))(seqop = (acc, record) => {
-          val (weightedAcc, weightsAcc) = acc
-          val (dist, temp) = record
-          val weight = math.pow(1.0 / dist, power)
-          val weighted = weight * temp
-          (weightedAcc + weighted, weightsAcc + weight)
+    if (temperatures.contains(query)) {
+      temperatures(query)
+    } else {
+      val (weightedSum, weightSum) = temperatures.aggregate((0.0, 0.0))(
+        seqop = (acc, record) => {
+          val (weightedSumAcc, weightSumAcc) = acc
+          val (location, temperature) = record
+          val distance = query.sphericalCosineDistance(location)
+          //            val weight = math.pow(1.0 / distance, power)
+          val weight = 1.0 / distance
+          (weightedSumAcc + weight * temperature, weightSumAcc + weight)
         }, combop = (w1, w2) => (w1._1 + w2._1, w1._2 + w2._2))
-
-        weighted / weights
+      weightedSum / weightSum
     }
   }
 
@@ -72,7 +74,7 @@ object Visualization {
     * @return The predicted temperature at `location`
     */
   def predictTemperature(temperatures: Iterable[(Location, Double)], location: Location): Double = {
-    idw(temperatures.par, location)
+    idw(temperatures.par.toMap, location)
   }
 
   /**
@@ -116,16 +118,13 @@ object Visualization {
     * @return A 360×180 image where each pixel shows the predicted temperature at its location
     */
   def visualize(temperatures: Iterable[(Location, Double)], colors: Iterable[(Double, Color)]): Image = {
-    val locations = for {
-      y <- Range(90, -90, -1)
-      x <- Range(-180, 180)
-    } yield Location(y, x)
-
-    val pixels = locations.par.map { location =>
-      val predictedTemp = predictTemperature(temperatures, location)
-      val color = interpolateColor(colors, predictedTemp)
-      Pixel(color.red, color.green, color.blue, 255)
-    }
+    val temperaturesMap = temperatures.par.toMap
+    val pixels = for {
+      latitude <- (90 until -90 by -1).par
+      longitude <- (-180 until 180).par
+      temperature = idw(temperaturesMap, Location(latitude, longitude))
+      color = interpolateColor(colors, temperature)
+    } yield Pixel(color.red, color.green, color.blue, 255)
 
     Image(360, 180, pixels.toArray)
   }
